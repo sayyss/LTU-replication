@@ -30,9 +30,15 @@ class PatchEmbed(nn.Module):
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
+        print("patch embed:",x.shape)
+        if torch.isnan(x).any():
+                    print("NaN detected before convo")
+        if torch.isinf(x).any():
+            print("Infinite values detected before convolution")
+        print("before convo:", x)
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
-
+"""
 class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
@@ -64,7 +70,56 @@ class Block(nn.Module):
         # this is a workaround to avoid ddp complain
         x = x + 0.0 * (self.norm1(x) + self.norm2(x) + self.norm1_a(x) + self.norm2_a(x) + self.norm1_v(x) + self.norm2_v(x))
         return x
+"""
+class Block(nn.Module):
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.norm1_a = norm_layer(dim)
+        self.norm1_v = norm_layer(dim)
+        self.attn = Attention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        self.norm2_a = norm_layer(dim)
+        self.norm2_v = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+    def forward(self, x, modality=None):
 
+            original_x = x
+            if modality is None:
+                x = self.norm1(x)
+                if torch.isnan(x).any():
+                    print("NaN detected after norm1")
+                x = x + self.drop_path(self.attn(x))
+                if torch.isnan(x).any():
+                    print("NaN detected after attn")
+                x = self.norm2(x)
+                if torch.isnan(x).any():
+                    print("NaN detected after norm2")
+                x = x + self.drop_path(self.mlp(x))
+                if torch.isnan(x).any():
+                    print("NaN detected after mlp")
+            elif modality == 'a':
+                x = self.norm1_a(x)
+                x = x + self.drop_path(self.attn(x))
+                x = self.norm2_a(x)
+                x = x + self.drop_path(self.mlp(x))
+            elif modality == 'v':
+                x = self.norm1_v(x)
+                x = x + self.drop_path(self.attn(x))
+                x = self.norm2_v(x)
+                x = x + self.drop_path(self.mlp(x))
+    
+            # Additional workaround to avoid ddp complain might not be necessary unless using ddp and seeing issues.
+            x = x + 0.0 * (original_x + self.norm1(original_x) + self.norm2(original_x) + 
+                           self.norm1_a(original_x) + self.norm2_a(original_x) + 
+                           self.norm1_v(original_x) + self.norm2_v(original_x))
+            return x
+        
 # the finetuned CAV-MAE model
 class CAVMAEFTAudio(nn.Module):
     def __init__(self, img_size=224, audio_length=1024, patch_size=16, in_chans=3,
@@ -118,19 +173,25 @@ class CAVMAEFTAudio(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, a):
+        print("from CAVE inside:", a)
         # expect input [b, t, f]
         a = a.unsqueeze(1)
         a = a.transpose(2, 3)
+        print("from CAVE before patch:",a)
         a = self.patch_embed_a(a)
+        print("from CAVE after patch:",a)
         a = a + self.pos_embed_a
         a = a + self.modality_a
-
+        print("from CAVE inside 2:", a)
+        print("shape before putting in block:",a.shape)
         for blk in self.blocks_a:
             a = blk(a)
 
         for blk in self.blocks_u:
             a = blk(a, 'a')
 
+        print("from CAVE inside 3:", a)
         a = self.norm_a(a)
         # output in shape [b, t, dim]
+        print("from CAVE inside 4:", a)
         return a
