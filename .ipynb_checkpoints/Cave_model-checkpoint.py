@@ -30,12 +30,13 @@ class PatchEmbed(nn.Module):
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
-        print("patch embed:",x.shape)
+        #print("patch embed:",x.shape)
         if torch.isnan(x).any():
                     print("NaN detected before convo")
         if torch.isinf(x).any():
             print("Infinite values detected before convolution")
-        print("before convo:", x)
+        #print("before convo:", x)
+        
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 """
@@ -173,25 +174,26 @@ class CAVMAEFTAudio(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, a):
-        print("from CAVE inside:", a)
+        #print("from CAVE inside:", a)
+        #print("shape before CAVE:", a.shape)
         # expect input [b, t, f]
         a = a.unsqueeze(1)
         a = a.transpose(2, 3)
-        print("from CAVE before patch:",a)
+        #print("from CAVE before patch:",a)
         a = self.patch_embed_a(a)
-        print("from CAVE after patch:",a)
+        #print("from CAVE after patch:",a)
         a = a + self.pos_embed_a
         a = a + self.modality_a
-        print("from CAVE inside 2:", a)
-        print("shape before putting in block:",a.shape)
+        #print("from CAVE inside 2:", a)
+        #print("shape before putting in block:",a.shape)
         for blk in self.blocks_a:
             a = blk(a)
 
         for blk in self.blocks_u:
             a = blk(a, 'a')
 
-        print("from CAVE inside 3:", a)
+        #print("from CAVE inside 3:", a)
         a = self.norm_a(a)
         # output in shape [b, t, dim]
-        print("from CAVE inside 4:", a)
+        #print("from CAVE inside 4:", a)
         return a
